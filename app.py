@@ -22,16 +22,16 @@ import calendar
 from dotenv import load_dotenv
 import os
 
-app = Flask(__name__)
-bcrypt = Bcrypt(app)
+load_dotenv()
 
+app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
 
-# ✅ Inisialisasi DB (hilangkan duplikat)
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
+bcrypt = Bcrypt(app)
 
 # ✅ Tambahkan fungsi global untuk tanggal
 

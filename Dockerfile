@@ -1,13 +1,28 @@
-FROM python:3.9-slim
+FROM python:3.11
 
+# Install PostgreSQL Server
+RUN apt-get update && apt-get install -y postgresql postgresql-contrib
+
+# Create working directory
 WORKDIR /app
 
-COPY requirements.txt .
+# Copy app files
+COPY . /app
+
+# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+# Setup PostgreSQL DB and user
+USER postgres
+RUN service postgresql start && \
+    psql --command "CREATE USER kasrt_user WITH PASSWORD 'passwordku';" && \
+    createdb -O kasrt_user kasrt
 
-ENV FLASK_APP=app.py
-ENV FLASK_ENV=development
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "app:app"]
+USER root
 
+# Expose ports (Flask and Postgres)
+EXPOSE 5000
+EXPOSE 5432
+
+# Jalankan PostgreSQL dan Flask app (pakai supervisord atau script bash)
+CMD service postgresql start && flask db upgrade && gunicorn -b 0.0.0.0:5000 app:app
