@@ -25,4 +25,9 @@ EXPOSE 5000
 EXPOSE 5432
 
 # Jalankan PostgreSQL dan Flask app (pakai supervisord atau script bash)
-CMD service postgresql start && flask db upgrade && gunicorn -b 0.0.0.0:5000 app:app
+CMD service postgresql start && \
+    flask db init && \
+    flask db migrate -m "Init PostgreSQL" && \
+    flask db upgrade && \
+    gunicorn -b 0.0.0.0:5000 app:app
+
