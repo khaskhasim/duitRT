@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Dashboard Warga - duitRT{% endblock %}
+
+{% block content %}
+<div class="container">
+  <h2 class="mb-4">Halo, {{ nama }}!</h2>
+  <div class="card text-white bg-info">
+    <div class="card-body">
+      <h5>Total Iuran yang Sudah Dibayar</h5>
+      <h3>Rp {{ "{:,.0f}".format(total_iuran_user) }}</h3>
+    </div>
+  </div>
+  <p class="mt-3 text-muted">Lihat detail di menu <strong>Iuran Saya</strong>.</p>
+</div>
+{% endblock %}
