@@ -1,33 +1,34 @@
+# Gunakan image Python dengan Debian
 FROM python:3.11
 
-# Install PostgreSQL Server
+# Install PostgreSQL
 RUN apt-get update && apt-get install -y postgresql postgresql-contrib
 
-# Create working directory
+# Buat direktori kerja
 WORKDIR /app
 
-# Copy app files
+# Salin semua file ke container
 COPY . /app
 
-# Install dependencies
+# Install dependensi Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Setup PostgreSQL DB and user
+# Buat user PostgreSQL dan database
 USER postgres
 RUN service postgresql start && \
     psql --command "CREATE USER kasrt_user WITH PASSWORD 'passwordku';" && \
     createdb -O kasrt_user kasrt
 
+# Kembali ke user root
 USER root
 
-# Expose ports (Flask and Postgres)
+# Salin dan beri izin eksekusi untuk entrypoint
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Expose port untuk Flask dan PostgreSQL
 EXPOSE 5000
 EXPOSE 5432
 
-# Jalankan PostgreSQL dan Flask app (pakai supervisord atau script bash)
-CMD service postgresql start && \
-    flask db init && \
-    flask db migrate -m "Init PostgreSQL" && \
-    flask db upgrade && \
-    gunicorn -b 0.0.0.0:5000 app:app
-
+# Jalankan skrip startup
+CMD ["/entrypoint.sh"]
