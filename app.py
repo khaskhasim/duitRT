@@ -25,9 +25,13 @@ import os
 load_dotenv()
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
+    'DATABASE_URL',
+    'postgresql://kasrt_user:passwordku@localhost:5432/kasrt'
+)
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'rahasia-sangat-rahasia')
 
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
@@ -1395,6 +1399,6 @@ def hapus_iuran_event(id):
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-        insert_default_users()
+        #insert_default_users()
     app.run(host='0.0.0.0', port=8001, debug=True)
 
