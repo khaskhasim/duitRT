@@ -1,6 +1,17 @@
 # Gunakan image Python dengan Debian
 FROM python:3.11
+# Set timezone environment
+ENV TZ=Asia/Jakarta
 
+# Install dependensi sistem + set timezone
+RUN apt-get update && apt-get install -y \
+    gcc \
+    libpq-dev \
+    curl \
+    tzdata \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
+    && echo $TZ > /etc/timezone \
+    && rm -rf /var/lib/apt/lists/*
 # Install PostgreSQL
 RUN apt-get update && apt-get install -y postgresql postgresql-contrib
 
