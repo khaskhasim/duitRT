@@ -11,3 +11,5 @@ pandas
 psycopg2-binary
 python-dotenv
 Flask-Bcrypt
+requests
+rapidfuzz

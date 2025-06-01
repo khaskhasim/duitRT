@@ -5,7 +5,7 @@
 {% block content %}
 <div class="container mt-4">
   <h2><i class="bi bi-upload"></i> Import Data Warga</h2>
-  <a href="data:text/csv;base64,bmFtYSxuaWssYWxhbWF0LHRlbGVwb24sc3RhdHVzLHVzZXJuYW1lLHBhc3N3b3JkCkJ1ZGkgU2FudG9zbywxMjM0NTY3ODkwMTIzLEpsLiBNZXJkZWthIE5vLjEsODEyMzQ1Njc4OTAsYWt0aWYsYnVkaTEyMywxMjM0NTYK" download="template_warga.csv" class="btn btn-outline-secondary mb-3">
+  <a href="data:text/csv;base64,bmFtYSxuaWssYWxhbWF0LHRlbGVwb24scm9sZSx1c2VybmFtZSwgcGFzc3dvcmQKQnVkaSBTYW50b3NvLDEyMzQ1Njc4OTAxMjMsSmwuIE1lcmRla2EgTm8uMSw4MTIzNDU2Nzg5MCx1c2VyLGJ1ZGkxMjMsMTIzNDU2Cg==" download="template_warga.csv" class="btn btn-outline-secondary mb-3">
     <i class="bi bi-download"></i> Unduh Template CSV
   </a>
   <form method="POST" action="{{ url_for('import_warga') }}" enctype="multipart/form-data">
@@ -38,10 +38,10 @@
         <input type="tel" class="form-control" name="telepon">
       </div>
       <div class="col-md-6">
-        <label for="status" class="form-label">Status</label>
-        <select class="form-select" name="status">
-          <option value="aktif">Aktif</option>
-          <option value="nonaktif">Nonaktif</option>
+        <label for="role" class="form-label">Peran</label>
+        <select class="form-select" name="role">
+          <option value="user">Warga Biasa</option>
+          <option value="petugas">Petugas</option>
         </select>
       </div>
       <div class="col-md-6">
@@ -70,7 +70,7 @@
           <th>NIK</th>
           <th>Alamat</th>
           <th>Telepon</th>
-          <th>Status</th>
+          <th>Peran</th>
           <th>Username</th> 
           <th class="text-center">Aksi</th>
         </tr>
@@ -83,7 +83,7 @@
           <td>{{ warga.nik }}</td>
           <td>{{ warga.alamat }}</td>
           <td>{{ warga.telepon }}</td>
-          <td>{{ warga.status }}</td>
+          <td>{{ warga.role|capitalize }}</td>
           <td>{{ warga.username }}</td> 
           <td class="text-center">
             <a href="{{ url_for('edit_warga', id=warga.id) }}" class="btn btn-sm btn-warning me-1">

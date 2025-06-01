@@ -21,17 +21,30 @@ from pytz import timezone
 import calendar
 from dotenv import load_dotenv
 import os
+##import requests
+
+from pytz import timezone
+from datetime import datetime
+
+jakarta = timezone('Asia/Jakarta')
+now = datetime.now(jakarta)
 
 load_dotenv()
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
-    'DATABASE_URL',
-    'postgresql://kasrt_user:passwordku@localhost:5432/kasrt'
-)
+#app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
+#    'DATABASE_URL',
+#    'postgresql://kasrt_user:passwordku@localhost:5432/kasrt'
+#)
 
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'rahasia-sangat-rahasia')
+#app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+#app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'rahasia-sangat-rahasia')
+
+##import os
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
+
+
 
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
@@ -130,7 +143,13 @@ class User(db.Model):
     password = db.Column(db.String(100), nullable=False)
     role = db.Column(db.String(20), nullable=False)  # 'admin', 'user', atau 'petugas'
 
+class Petugas(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    nama = db.Column(db.String(100), nullable=False)
+    wa_number = db.Column(db.String(20), unique=True, nullable=False)
 
+
+    
 # =====================
 # ROUTES
 # =====================
@@ -812,32 +831,31 @@ def tambah_warga():
 @app.route('/warga/edit/<int:id>', methods=['GET', 'POST'])
 def edit_warga(id):
     warga = Warga.query.get_or_404(id)
-    
+
     if request.method == 'POST':
         warga.nama = request.form['nama']
         nik = request.form.get('nik', '').strip()
         nik = nik if nik else None
 
-        # Validasi NIK unik hanya jika berubah
         if nik and nik != warga.nik and Warga.query.filter_by(nik=nik).first():
             flash('NIK sudah terdaftar', 'danger')
             return redirect(url_for('edit_warga', id=id))
-        
+
         warga.nik = nik
         warga.alamat = request.form['alamat']
         warga.telepon = request.form.get('telepon', '').strip()
-        warga.status = request.form['status']
         warga.username = request.form['username']
+        warga.role = request.form['role']  # hanya role, status dihapus
 
-        # Update password jika diisi
         if request.form['password']:
             warga.password = bcrypt.generate_password_hash(request.form['password']).decode('utf-8')
-        
+
         db.session.commit()
         flash('Data warga berhasil diperbarui', 'success')
         return redirect(url_for('data_warga'))
-    
+
     return render_template('edit_warga.html', warga=warga)
+
 
 @app.route('/warga/hapus/<int:id>', methods=['POST'])
 def hapus_warga(id):
@@ -1391,6 +1409,94 @@ def hapus_iuran_event(id):
     db.session.commit()
     flash('Iuran Event berhasil dihapus', 'success')
     return redirect(url_for('laporan_iuran_event'))
+
+
+@app.route('/api/iuran', methods=['POST'])
+def api_iuran():
+    data = request.json
+    sender = data.get('petugas')  # nomor WA tanpa @ atau kode negara
+    nama_input = data.get('nama', '').lower()
+    jumlah = int(data.get('jumlah', 0))
+    minggu = int(data.get('minggu', 1))
+
+    # Validasi petugas: cocokkan nomor WA dengan warga ber-role petugas
+    petugas = Warga.query.filter(
+        Warga.role == 'petugas',
+        func.replace(Warga.telepon, '-', '').endswith(sender[-10:])
+    ).first()
+
+    print('Nomor pengirim:', sender)
+    print('Petugas ditemukan:', petugas.nama if petugas else 'TIDAK DITEMUKAN')
+
+
+    if not petugas:
+        return jsonify({'status': 'forbidden', 'message': 'Nomor ini tidak terdaftar sebagai petugas.'}), 403
+
+    # Cari nama warga dengan fuzzy match (like)
+    warga = Warga.query.filter(Warga.nama.ilike(f"%{nama_input}%")).first()
+    if not warga:
+        return jsonify({'status': 'error', 'message': 'Nama warga tidak ditemukan.'}), 404
+
+    # Validasi: tolak jika sudah membayar minggu ini atau minggu depan
+    today = datetime.now(timezone('Asia/Jakarta'))
+    minggu_ke = int(today.strftime('%W'))
+
+    minggu_terblokir = [str(minggu_ke + i) for i in range(minggu)]
+    existing = db.session.query(Iuran).filter(
+        Iuran.warga_id == warga.id,
+        extract('year', Iuran.tanggal) == today.year,
+        func.to_char(Iuran.tanggal, 'WW').in_(minggu_terblokir)
+    ).first()
+
+    if existing:
+        return jsonify({'status': 'error', 'message': f'{warga.nama} sudah membayar untuk minggu ini/minggu depan.'}), 409
+
+    # Catat iuran
+    for i in range(minggu):
+        tanggal_iuran = today + timedelta(weeks=i)
+        iuran = Iuran(warga_id=warga.id, tanggal=tanggal_iuran, jumlah=jumlah // minggu, petugas=petugas.nama)
+        db.session.add(iuran)
+
+    db.session.commit()
+
+    return jsonify({'status': 'success', 'nama_lengkap': warga.nama})
+
+
+
+
+
+
+@app.route('/admin/petugas', methods=['GET', 'POST'])
+def kelola_petugas():
+    if request.method == 'POST':
+        nama = request.form['nama']
+        wa_number = request.form['wa_number']
+
+        if Petugas.query.filter_by(wa_number=wa_number).first():
+            flash('Nomor WA sudah terdaftar sebagai petugas.', 'warning')
+        else:
+            db.session.add(Petugas(nama=nama, wa_number=wa_number))
+            db.session.commit()
+            flash('Petugas berhasil ditambahkan.', 'success')
+
+        return redirect(url_for('kelola_petugas'))
+
+    petugas = Petugas.query.all()
+    return render_template('admin_petugas.html', petugas=petugas)
+
+@app.route('/admin/petugas/hapus/<int:id>', methods=['POST'])
+def hapus_petugas(id):
+    petugas = Petugas.query.get_or_404(id)
+    db.session.delete(petugas)
+    db.session.commit()
+    flash('Petugas berhasil dihapus.', 'success')
+    return redirect(url_for('kelola_petugas'))
+
+
+
+
+
+
 
 
 # =====================
