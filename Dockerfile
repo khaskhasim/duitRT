@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y \
     && echo $TZ > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*
 # Install PostgreSQL
-RUN apt-get update && apt-get install -y postgresql postgresql-contrib
+##RUN apt-get update && apt-get install -y postgresql postgresql-contrib
 
 # Buat direktori kerja
 WORKDIR /app
@@ -25,13 +25,13 @@ COPY . /app
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Buat user PostgreSQL dan database
-USER postgres
-RUN service postgresql start && \
-    psql --command "CREATE USER kasrt_user WITH PASSWORD 'passwordku';" && \
-    createdb -O kasrt_user kasrt
+##USER postgres
+##RUN service postgresql start && \
+##    psql --command "CREATE USER kasrt_user WITH PASSWORD 'passwordku';" && \
+##    createdb -O kasrt_user kasrt
 
 # Kembali ke user root
-USER root
+##USER root
 
 # Salin dan beri izin eksekusi untuk entrypoint
 COPY entrypoint.sh /entrypoint.sh
