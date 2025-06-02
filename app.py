@@ -139,9 +139,10 @@ class Pengeluaran(db.Model):
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(50), unique=True, nullable=False)
+    telepon = db.Column(db.String(20), unique=True, nullable=True)  # tambahkan ini
     password = db.Column(db.String(100), nullable=False)
-    role = db.Column(db.String(20), nullable=False)  # 'admin', 'user', atau 'petugas'
+    role = db.Column(db.String(10))  # 'admin' atau 'petugas'
+
 
 class Petugas(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -251,26 +252,36 @@ def index():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        uname = request.form['username']
+        nomor = request.form['username'].strip()
         pw = request.form['password']
 
-        # ✅ Cek tabel User (admin/petugas)
-        user = User.query.filter_by(username=uname).first()
-        if user and bcrypt.check_password_hash(user.password, pw):
-            session['username'] = user.username
-            session['role'] = user.role
-            return redirect(url_for('dashboard'))
+        # 🔍 Cek di tabel User (petugas) berdasarkan no telepon
+        user = User.query.filter_by(telepon=nomor).first()
+        if user:
+            if bcrypt.check_password_hash(user.password, pw):
+                session['username'] = user.telepon
+                session['role'] = user.role  # petugas
+                return redirect(url_for('dashboard'))
+            else:
+                flash('Password salah untuk akun petugas', 'danger')
+                return render_template('login.html')
 
-        # ✅ Cek tabel Warga (jika warga juga bisa login)
-        warga = Warga.query.filter_by(username=uname).first()
-        if warga and bcrypt.check_password_hash(warga.password, pw):
-            session['username'] = warga.username
-            session['role'] = warga.role
-            return redirect(url_for('dashboard'))
+        # 🔍 Cek di tabel Warga (login sebagai warga biasa)
+        warga = Warga.query.filter_by(telepon=nomor).first()
+        if warga:
+            if bcrypt.check_password_hash(warga.password, pw):
+                session['username'] = warga.telepon
+                session['role'] = 'user'
+                return redirect(url_for('dashboard'))
+            else:
+                flash('Password salah untuk akun warga', 'danger')
+                return render_template('login.html')
 
-        flash('Username atau password salah', 'danger')
+        # ❌ Jika tidak ditemukan di keduanya
+        flash('Nomor telepon tidak ditemukan', 'danger')
 
     return render_template('login.html')
+
 
 
 
@@ -1409,89 +1420,6 @@ def hapus_iuran_event(id):
     db.session.commit()
     flash('Iuran Event berhasil dihapus', 'success')
     return redirect(url_for('laporan_iuran_event'))
-
-
-@app.route('/api/iuran', methods=['POST'])
-def api_iuran():
-    data = request.json
-    sender = data.get('petugas')  # nomor WA tanpa @ atau kode negara
-    nama_input = data.get('nama', '').lower()
-    jumlah = int(data.get('jumlah', 0))
-    minggu = int(data.get('minggu', 1))
-
-    # Validasi petugas: cocokkan nomor WA dengan warga ber-role petugas
-    petugas = Warga.query.filter(
-        Warga.role == 'petugas',
-        func.replace(Warga.telepon, '-', '').endswith(sender[-10:])
-    ).first()
-
-    print('Nomor pengirim:', sender)
-    print('Petugas ditemukan:', petugas.nama if petugas else 'TIDAK DITEMUKAN')
-
-
-    if not petugas:
-        return jsonify({'status': 'forbidden', 'message': 'Nomor ini tidak terdaftar sebagai petugas.'}), 403
-
-    # Cari nama warga dengan fuzzy match (like)
-    warga = Warga.query.filter(Warga.nama.ilike(f"%{nama_input}%")).first()
-    if not warga:
-        return jsonify({'status': 'error', 'message': 'Nama warga tidak ditemukan.'}), 404
-
-    # Validasi: tolak jika sudah membayar minggu ini atau minggu depan
-    today = datetime.now(timezone('Asia/Jakarta'))
-    minggu_ke = int(today.strftime('%W'))
-
-    minggu_terblokir = [str(minggu_ke + i) for i in range(minggu)]
-    existing = db.session.query(Iuran).filter(
-        Iuran.warga_id == warga.id,
-        extract('year', Iuran.tanggal) == today.year,
-        func.to_char(Iuran.tanggal, 'WW').in_(minggu_terblokir)
-    ).first()
-
-    if existing:
-        return jsonify({'status': 'error', 'message': f'{warga.nama} sudah membayar untuk minggu ini/minggu depan.'}), 409
-
-    # Catat iuran
-    for i in range(minggu):
-        tanggal_iuran = today + timedelta(weeks=i)
-        iuran = Iuran(warga_id=warga.id, tanggal=tanggal_iuran, jumlah=jumlah // minggu, petugas=petugas.nama)
-        db.session.add(iuran)
-
-    db.session.commit()
-
-    return jsonify({'status': 'success', 'nama_lengkap': warga.nama})
-
-
-
-
-
-
-@app.route('/admin/petugas', methods=['GET', 'POST'])
-def kelola_petugas():
-    if request.method == 'POST':
-        nama = request.form['nama']
-        wa_number = request.form['wa_number']
-
-        if Petugas.query.filter_by(wa_number=wa_number).first():
-            flash('Nomor WA sudah terdaftar sebagai petugas.', 'warning')
-        else:
-            db.session.add(Petugas(nama=nama, wa_number=wa_number))
-            db.session.commit()
-            flash('Petugas berhasil ditambahkan.', 'success')
-
-        return redirect(url_for('kelola_petugas'))
-
-    petugas = Petugas.query.all()
-    return render_template('admin_petugas.html', petugas=petugas)
-
-@app.route('/admin/petugas/hapus/<int:id>', methods=['POST'])
-def hapus_petugas(id):
-    petugas = Petugas.query.get_or_404(id)
-    db.session.delete(petugas)
-    db.session.commit()
-    flash('Petugas berhasil dihapus.', 'success')
-    return redirect(url_for('kelola_petugas'))
-
 
 
 
