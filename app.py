@@ -86,11 +86,11 @@ class Warga(db.Model):
     nama = db.Column(db.String(100), nullable=False)
     nik = db.Column(db.String(30), unique=True)
     alamat = db.Column(db.String(255))
-    telepon = db.Column(db.String(30))
+    telepon = db.Column(db.String(30), unique=True, nullable=False)  # login warga
     status = db.Column(db.String(20), default='aktif')
-    username = db.Column(db.String(50), unique=True, nullable=False)
+    username = db.Column(db.String(50), unique=True, nullable=True)  # login admin
     password = db.Column(db.String(128), nullable=False)
-    role = db.Column(db.String(20), default='user')
+    role = db.Column(db.String(20), default='user')  # 'admin', 'petugas', 'user'
 
 
 
@@ -1495,6 +1495,185 @@ def hapus_petugas(id):
 
 
 
+@app.route('/api/iuran', methods=['POST'])
+def api_iuran():
+    data = request.get_json()
+    nama_input = data.get('nama', '').lower()
+    jumlah_total = data.get('jumlah', 0)
+    jumlah_minggu = data.get('minggu', 1)
+    sender = data.get('petugas')
+
+    if not sender or not nama_input or not jumlah_total or not jumlah_minggu:
+        return jsonify({'message': 'Data tidak lengkap.'}), 400
+
+    try:
+        jumlah_per_minggu = jumlah_total / jumlah_minggu
+    except:
+        return jsonify({'message': 'Format jumlah atau minggu tidak valid.'}), 400
+
+    # Validasi batas iuran per minggu
+    if jumlah_per_minggu < 2000 or jumlah_per_minggu > 5000:
+        return jsonify({
+            'message': f'Iuran per minggu harus antara Rp 2000 - Rp 5000. Saat ini: Rp {jumlah_per_minggu:,.0f}'.replace(',', '.')
+        }), 400
+
+    # Validasi petugas dari data warga
+    sender_normalized = sender[-10:]
+    petugas = Warga.query.filter(
+        Warga.role == 'petugas',
+        func.replace(Warga.telepon, '-', '').endswith(sender_normalized)
+    ).first()
+
+    if not petugas:
+        return jsonify({'message': 'Hanya petugas yang bisa mencatat iuran.'}), 403
+
+    # Cari warga berdasarkan nama (case-insensitive)
+    warga = Warga.query.filter(func.lower(Warga.nama).like(f"%{nama_input}%")).first()
+    if not warga:
+        return jsonify({'message': f'Warga dengan nama mengandung "{nama_input}" tidak ditemukan.'}), 404
+
+    # Waktu dan tanggal target minggu ke depan
+    zona_wib = timezone('Asia/Jakarta')
+    today = datetime.now(zona_wib).date()
+    tanggal_target = [today + timedelta(weeks=i) for i in range(jumlah_minggu)]
+
+    # Cek apakah warga sudah membayar di minggu-minggu tersebut
+    existing_iuran = Iuran.query.filter(
+        Iuran.warga_id == warga.id,
+        func.date(Iuran.tanggal).in_(tanggal_target)
+    ).all()
+
+    if existing_iuran:
+        daftar_tanggal = [i.tanggal.strftime('%d/%m') for i in existing_iuran]
+        return jsonify({
+            'message': f'❌ Warga ini sudah membayar untuk tanggal: {", ".join(daftar_tanggal)}'
+        }), 409
+
+    # Simpan iuran untuk minggu ke depan
+    for i in range(jumlah_minggu):
+        tanggal_iuran = today + timedelta(weeks=i)
+        iuran = Iuran(
+            warga_id=warga.id,
+            tanggal=tanggal_iuran,
+            jumlah=jumlah_per_minggu,
+            petugas=sender
+        )
+        db.session.add(iuran)
+
+    db.session.commit()
+
+    return jsonify({
+        'status': 'success',
+        'nama_lengkap': warga.nama,
+        'petugas_nama': petugas.nama
+    })
+
+
+
+
+@app.route('/api/hapus_iuran', methods=['POST'])
+def hapus_iuran_api():
+    data = request.get_json()
+    nama = data.get('nama', '').strip().lower()
+    minggu = int(data.get('jumlah', 1))
+    sender = data.get('petugas', '').strip()
+
+    # Validasi petugas
+    petugas = Warga.query.filter(
+        Warga.role == 'petugas',
+        func.replace(Warga.telepon, '-', '').endswith(sender[-10:])
+    ).first()
+
+    if not petugas:
+        return jsonify({'message': 'Hanya petugas yang dapat menghapus iuran.'}), 403
+
+    # Ambil warga sesuai nama
+    warga = Warga.query.filter(func.lower(Warga.nama).like(f'%{nama}%')).first()
+    if not warga:
+        return jsonify({'message': 'Warga tidak ditemukan'}), 404
+
+    # Ambil iuran terakhir berdasarkan tanggal
+    iuran_terakhir = Iuran.query.filter_by(warga_id=warga.id)\
+        .order_by(Iuran.tanggal.desc()).limit(minggu).all()
+
+    if not iuran_terakhir:
+        return jsonify({'message': 'Tidak ada data iuran untuk dihapus'}), 404
+
+    total_dihapus = sum(i.jumlah for i in iuran_terakhir)
+
+    for iuran in iuran_terakhir:
+        db.session.delete(iuran)
+    db.session.commit()
+
+    return jsonify({
+        'message': f'Iuran sebanyak {minggu} minggu (Rp {total_dihapus}) berhasil dihapus untuk {warga.nama}',
+        'nama_lengkap': warga.nama,
+        'petugas_nama': petugas.nama
+    }), 200
+
+
+@app.route('/api/laporan_petugas_minggu_ini')
+def laporan_petugas_minggu_ini():
+    zona = timezone('Asia/Jakarta')
+    today = datetime.now(zona).date()
+    start = today - timedelta(days=today.weekday())
+    end = start + timedelta(days=6)
+
+    # Ambil semua data iuran minggu ini
+    iuran_minggu_ini = db.session.query(
+        Iuran.petugas,
+        Iuran.jumlah,
+        Iuran.tanggal,
+        Warga.nama.label('nama_warga')
+    ).join(Warga, Warga.id == Iuran.warga_id).filter(
+        Iuran.tanggal.between(start, end)
+    ).all()
+
+    # Petakan WA dan username berdasarkan data warga
+    petugas_list = Warga.query.filter(Warga.role == 'petugas').all()
+    map_wa_to_user = {}
+    user_to_nama = {}
+
+    for p in petugas_list:
+        if p.telepon:
+            akhir_10 = p.telepon[-10:]
+            map_wa_to_user[akhir_10] = p.username
+        user_to_nama[p.username] = p.nama
+
+    hasil = {}
+    for item in iuran_minggu_ini:
+        petugas = item.petugas or "?"
+        petugas_id = map_wa_to_user.get(petugas[-10:], petugas)  # Normalisasi
+
+        if petugas_id not in hasil:
+            hasil[petugas_id] = {
+                'nama_petugas': user_to_nama.get(petugas_id, petugas_id),
+                'total': 0,
+                'detail': []
+            }
+
+        asal = '(via WA)' if petugas.isdigit() else '(via Web)'
+        hasil[petugas_id]['total'] += item.jumlah
+        hasil[petugas_id]['detail'].append({
+            'nama_warga': item.nama_warga,
+            'jumlah': item.jumlah,
+            'tanggal': item.tanggal.strftime('%d-%m-%Y'),
+            'asal': asal
+        })
+
+    return jsonify(hasil)
+
+
+
+
+
+
+def get_nama_petugas_by_nomor(nomor):
+    if not nomor:
+        return 'Tidak diketahui'
+    nomor_bersih = nomor[-10:]
+    petugas = Warga.query.filter(func.replace(Warga.telepon, '-', '').endswith(nomor_bersih)).first()
+    return petugas.nama if petugas else nomor
 
 
 
