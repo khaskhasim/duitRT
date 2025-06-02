@@ -139,9 +139,11 @@ class Pengeluaran(db.Model):
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    telepon = db.Column(db.String(20), unique=True, nullable=True)  # tambahkan ini
+    username = db.Column(db.String(50), unique=True)  # 👉 ini baris yang kamu maksud
+    telepon = db.Column(db.String(20), unique=True, nullable=False)
     password = db.Column(db.String(100), nullable=False)
-    role = db.Column(db.String(10))  # 'admin' atau 'petugas'
+    role = db.Column(db.String(10))  # admin / petugas
+
 
 
 class Petugas(db.Model):
@@ -248,39 +250,33 @@ def index():
     return redirect(url_for('dashboard'))
 
 
-
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        nomor = request.form['username'].strip()
+        identitas = request.form['username'].strip()
         pw = request.form['password']
 
-        # 🔍 Cek di tabel User (petugas) berdasarkan no telepon
-        user = User.query.filter_by(telepon=nomor).first()
-        if user:
-            if bcrypt.check_password_hash(user.password, pw):
-                session['username'] = user.telepon
-                session['role'] = user.role  # petugas
+        # 1️⃣ ADMIN pakai username (contoh: 'admin')
+        if identitas == 'admin':
+            user = User.query.filter_by(username='admin').first()
+            if user and bcrypt.check_password_hash(user.password, pw):
+                session['username'] = user.username
+                session['role'] = 'admin'
                 return redirect(url_for('dashboard'))
-            else:
-                flash('Password salah untuk akun petugas', 'danger')
-                return render_template('login.html')
+            flash('Password salah untuk admin', 'danger')
+            return render_template('login.html')
 
-        # 🔍 Cek di tabel Warga (login sebagai warga biasa)
-        warga = Warga.query.filter_by(telepon=nomor).first()
-        if warga:
-            if bcrypt.check_password_hash(warga.password, pw):
-                session['username'] = warga.telepon
-                session['role'] = 'user'
-                return redirect(url_for('dashboard'))
-            else:
-                flash('Password salah untuk akun warga', 'danger')
-                return render_template('login.html')
+        # 2️⃣ PETUGAS dan WARGA pakai nomor telepon dari tabel Warga
+        warga = Warga.query.filter_by(telepon=identitas).first()
+        if warga and bcrypt.check_password_hash(warga.password, pw):
+            session['telepon'] = warga.telepon
+            session['role'] = warga.role  # 'user' atau 'petugas'
+            return redirect(url_for('dashboard'))
 
-        # ❌ Jika tidak ditemukan di keduanya
-        flash('Nomor telepon tidak ditemukan', 'danger')
+        flash('Login gagal. Nomor telepon atau password salah.', 'danger')
 
     return render_template('login.html')
+
 
 
 
@@ -298,7 +294,7 @@ def inject_datetime():
 
 @app.route('/dashboard')
 def dashboard():
-    if 'username' not in session:
+    if 'role' not in session:
         return redirect(url_for('login'))
 
     role = session.get('role')
@@ -410,7 +406,11 @@ def dashboard():
         )
 
     elif role == 'user':
-        warga = Warga.query.filter_by(username=session['username']).first()
+        if 'telepon' not in session:
+            flash("Sesi login tidak ditemukan", "danger")
+            return redirect(url_for('logout'))
+
+        warga = Warga.query.filter_by(telepon=session['telepon']).first()
         if not warga:
             flash("Data warga tidak ditemukan", "danger")
             return redirect(url_for('logout'))
@@ -443,7 +443,7 @@ def dashboard():
 
 @app.route('/input_iuran_petugas', methods=['GET', 'POST'])
 def input_iuran_petugas():
-    if 'username' not in session or session.get('role') not in ['petugas', 'admin']:
+    if 'telepon' not in session or session.get('role') not in ['petugas', 'admin']:
         flash("Akses ditolak", "danger")
         return redirect(url_for('login'))
 
@@ -468,7 +468,7 @@ def input_iuran_petugas():
 
         if per_minggu > 5000:
             min_minggu = (total_bayar + 4999) // 5000
-            flash(f"Iuran per minggu Rp {per_minggu:,} melebihi Rp 5.000. Coba gunakan minimal {min_minggu} minggu", "danger")
+            flash(f"Iuran per minggu Rp {per_minggu:,} melebihi Rp 5.000. Gunakan minimal {min_minggu} minggu", "danger")
             return redirect(url_for('input_iuran_petugas'))
 
         warga = Warga.query.filter_by(nama=nama).first()
@@ -476,7 +476,6 @@ def input_iuran_petugas():
             flash(f"Warga dengan nama '{nama}' tidak ditemukan", 'danger')
             return redirect(url_for('input_iuran_petugas'))
 
-        # WIB time zone
         zona_wib = timezone('Asia/Jakarta')
         minggu_bentrok = []
 
@@ -486,29 +485,35 @@ def input_iuran_petugas():
             bulan = tanggal.month
             minggu_ke = ((tanggal.day - 1) // 7) + 1
 
-            iuran_minggu_ini = Iuran.query.filter(
+            # Ambil semua iuran bulan itu
+            iurans_bulan = Iuran.query.filter(
                 Iuran.warga_id == warga.id,
                 extract('year', Iuran.tanggal) == tahun,
-                extract('month', Iuran.tanggal) == bulan,
-                ((extract('day', Iuran.tanggal) - 1) // 7 + 1) == minggu_ke
-            ).first()
+                extract('month', Iuran.tanggal) == bulan
+            ).all()
 
-            if iuran_minggu_ini:
+            # Cek bentrok
+            sudah_bayar = any(
+                ((i.tanggal.day - 1) // 7 + 1) == minggu_ke for i in iurans_bulan
+            )
+
+            if sudah_bayar:
                 minggu_bentrok.append(f"Minggu ke-{minggu_ke} ({tanggal.strftime('%d/%m')})")
 
         if minggu_bentrok:
             flash(f"❌ Pembayaran ditolak! Warga sudah bayar di: {', '.join(minggu_bentrok)}", "danger")
             return redirect(url_for('input_iuran_petugas'))
 
-        # ✅ Catat semua minggu yang valid
+        # ✅ Simpan iuran untuk minggu-minggu valid
         for i in range(jumlah_minggu):
             tanggal = datetime.now(zona_wib) + timedelta(weeks=i)
-            db.session.add(Iuran(
+            iuran = Iuran(
                 warga_id=warga.id,
                 jumlah=per_minggu,
                 tanggal=tanggal,
-                petugas=session['username']
-            ))
+                petugas=session['telepon']
+            )
+            db.session.add(iuran)
 
         db.session.commit()
         flash("✅ Iuran berhasil dicatat", "success")
@@ -520,16 +525,14 @@ def input_iuran_petugas():
 
 @app.route('/daftar_iuran')
 def daftar_iuran():
-    if 'username' not in session or session.get('role') not in ['admin', 'petugas']:
-        flash("Akses ditolak", "danger")
-        return redirect(url_for('login'))
+
 
     iurans = Iuran.query.order_by(Iuran.tanggal.desc()).all()
     return render_template('daftar_iuran.html', iurans=iurans)
 
 @app.route('/iuran/edit/<int:id>', methods=['GET', 'POST'])
 def edit_iuran(id):
-    if 'username' not in session or session.get('role') not in ['admin', 'petugas']:
+    if 'telepon' not in session or session.get('role') not in ['admin', 'petugas']:
         flash("Akses ditolak", "danger")
         return redirect(url_for('login'))
 
@@ -550,9 +553,7 @@ def edit_iuran(id):
 
 @app.route('/iuran/hapus/<int:id>', methods=['POST'])
 def hapus_iuran(id):
-    if 'username' not in session or session.get('role') not in ['admin', 'petugas']:
-        flash("Akses ditolak", "danger")
-        return redirect(url_for('login'))
+
 
     iuran = Iuran.query.get_or_404(id)
     try:
@@ -1299,7 +1300,7 @@ def iuran_saya():
 
 @app.route('/input_iuran_event_petugas', methods=['GET', 'POST'])
 def input_iuran_event_petugas():
-    if 'username' not in session or session['role'] not in ['admin', 'petugas']:
+    if 'telepon' not in session or session['role'] not in ['admin', 'petugas']:
         flash("Akses ditolak", "danger")
         return redirect(url_for('login'))
 
@@ -1321,7 +1322,7 @@ def input_iuran_event_petugas():
             warga_id=warga.id,
             nama_event=nama_event,
             jumlah=int(jumlah),
-            petugas=session['username'],
+            petugas=session['telepon'],
             tanggal=datetime.now(zona_wib)
         )
         db.session.add(iuran)
