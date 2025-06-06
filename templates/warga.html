@@ -31,7 +31,7 @@
       </div>
       <div class="col-12">
         <label for="alamat" class="form-label">Alamat</label>
-        <textarea class="form-control" name="alamat" rows="2" required></textarea>
+        <textarea class="form-control" name="alamat" rows="2" ></textarea>
       </div>
       <div class="col-md-6">
         <label for="telepon" class="form-label">Telepon</label>
@@ -44,10 +44,7 @@
           <option value="petugas">Petugas</option>
         </select>
       </div>
-      <div class="col-md-6">
-        <label for="username" class="form-label">Username</label>
-        <input type="text" class="form-control" name="username" required>
-      </div>
+
       <div class="col-md-6">
         <label for="password" class="form-label">Password</label>
         <input type="password" class="form-control" name="password" required>
@@ -71,7 +68,6 @@
           <th>Alamat</th>
           <th>Telepon</th>
           <th>Peran</th>
-          <th>Username</th> 
           <th class="text-center">Aksi</th>
         </tr>
       </thead>
@@ -84,7 +80,7 @@
           <td>{{ warga.alamat }}</td>
           <td>{{ warga.telepon }}</td>
           <td>{{ warga.role|capitalize }}</td>
-          <td>{{ warga.username }}</td> 
+
           <td class="text-center">
             <a href="{{ url_for('edit_warga', id=warga.id) }}" class="btn btn-sm btn-warning me-1">
               <i class="bi bi-pencil"></i>

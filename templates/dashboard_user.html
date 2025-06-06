@@ -2,14 +2,89 @@
 {% block title %}Dashboard Warga - duitRT{% endblock %}
 
 {% block content %}
-<div class="container">
-  <h2 class="mb-4">Halo, {{ nama }}!</h2>
-  <div class="card text-white bg-info">
-    <div class="card-body">
-      <h5>Total Iuran yang Sudah Dibayar</h5>
-      <h3>Rp {{ "{:,.0f}".format(total_iuran_user) }}</h3>
+<div class="container py-4">
+  <h4 class="mb-4">👋 Halo, <strong>{{ nama }}</strong></h4>
+
+  <div class="row g-4 mb-4">
+    <div class="col-md-4">
+      <div class="card text-white bg-success shadow-sm">
+        <div class="card-body">
+          <h6 class="mb-1">Total Iuran</h6>
+          <h4>Rp {{ "{:,.0f}".format(total_iuran) }}</h4>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card text-white bg-danger shadow-sm">
+        <div class="card-body">
+          <h6 class="mb-1">Total Pengeluaran</h6>
+          <h4>Rp {{ "{:,.0f}".format(total_pengeluaran) }}</h4>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card text-white bg-warning shadow-sm">
+        <div class="card-body">
+          <h6 class="mb-1">Sisa Kas</h6>
+          <h4>Rp {{ "{:,.0f}".format(sisa_kas) }}</h4>
+        </div>
+      </div>
     </div>
   </div>
-  <p class="mt-3 text-muted">Lihat detail di menu <strong>Iuran Saya</strong>.</p>
+
+  <!-- Grafik -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-header bg-white">
+      <h5 class="mb-0"><i class="bi bi-bar-chart"></i> Grafik Kas Bulan Ini</h5>
+    </div>
+    <div class="card-body">
+      <canvas id="grafikKasUser"></canvas>
+    </div>
+  </div>
+
+ 
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+  const ctx = document.getElementById('grafikKasUser').getContext('2d');
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: {{ labels|tojson }},
+      datasets: [
+        {
+          label: 'Pemasukan',
+          data: {{ data_iuran|tojson }},
+          backgroundColor: '#198754'
+        },
+        {
+          label: 'Pengeluaran',
+          data: {{ data_pengeluaran|tojson }},
+          backgroundColor: '#dc3545'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        tooltip: {
+          callbacks: {
+            label: ctx => ctx.dataset.label + ': Rp ' + ctx.raw.toLocaleString('id-ID')
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: {
+            callback: val => 'Rp ' + val.toLocaleString('id-ID')
+          }
+        }
+      }
+    }
+  });
+</script>
 {% endblock %}

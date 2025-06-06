@@ -160,9 +160,8 @@
 
   {% elif session['role'] == 'user' %}
     <div class="menu-title">Laporan</div>
-    <a href="{{ url_for('laporan') }}"><i class="bi bi-clipboard-check"></i><span class="sidebar-text">Riwayat Keuangan</span></a>
     <a href="{{ url_for('iuran_saya') }}"><i class="bi bi-graph-up"></i><span class="sidebar-text">Iuran Saya</span></a>
-    <a href="{{ url_for('laporan_iuran_event') }}"><i class="bi bi-graph-up"></i><span class="sidebar-text">Laporan Iuaran Event</span></a>
+    <a href="{{ url_for('laporan_iuran_event_per_warga') }}"><i class="bi bi-graph-up"></i><span class="sidebar-text">Laporan Iuaran Event</span></a>
 
   {% endif %}
 

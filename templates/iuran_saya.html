@@ -5,31 +5,65 @@
 <div class="container mt-4">
   <h3><i class="bi bi-wallet"></i> Riwayat Iuran Saya</h3>
 
+  <!-- Filter Bulan dan Tahun -->
+  <form method="get" class="row g-3 align-items-end mb-4">
+    <div class="col-md-2">
+      <label class="form-label">Bulan</label>
+      <select name="bulan" class="form-select form-select-sm">
+        {% for i in range(1, 13) %}
+        <option value="{{ i }}" {% if bulan == i %}selected{% endif %}>
+          {{ ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'][i-1] }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Tahun</label>
+      <select name="tahun" class="form-select form-select-sm">
+        {% for y in range(2023, datetime.now().year + 1) %}
+        <option value="{{ y }}" {% if tahun == y %}selected{% endif %}>{{ y }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-auto">
+      <button class="btn btn-sm btn-primary">
+        <i class="bi bi-filter"></i> Tampilkan
+      </button>
+    </div>
+  </form>
+
   {% if iurans %}
-  <table class="table table-bordered table-striped mt-3">
-    <thead class="table-light">
-      <tr>
-        <th>Tanggal</th>
-        <th>Jumlah</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for i in iurans %}
-      <tr>
-        <td>{{ i.tanggal.strftime('%d/%m/%Y') }}</td>
-        <td>Rp {{ "{:,.0f}".format(i.jumlah) }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-    <tfoot>
-      <tr class="table-light fw-bold">
-        <td>Total</td>
-        <td>Rp {{ "{:,.0f}".format(total) }}</td>
-      </tr>
-    </tfoot>
-  </table>
+  <div class="table-responsive">
+    <table class="table table-bordered table-striped mt-3">
+      <thead class="table-light">
+        <tr>
+          <th>Tanggal</th>
+          <th>Jumlah</th>
+          <th>Petugas</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for i in iurans %}
+        <tr>
+          <td>{{ i.tanggal.strftime('%d/%m/%Y') }}</td>
+          <td>Rp {{ "{:,.0f}".format(i.jumlah) }}</td>
+          <td>
+            {% set petugas = wargas_dict.get(i.petugas) %}
+            {{ petugas if petugas else (i.petugas or '-') }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="table-light fw-bold">
+          <td>Total</td>
+          <td colspan="2">Rp {{ "{:,.0f}".format(total) }}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
   {% else %}
-    <div class="alert alert-info">Belum ada data iuran.</div>
+    <div class="alert alert-info">Belum ada data iuran pada bulan dan tahun ini.</div>
   {% endif %}
 </div>
 {% endblock %}

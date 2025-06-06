@@ -1,18 +1,25 @@
-from app import db
-from app.models import User
 from flask_bcrypt import Bcrypt
+from app import app, db, User  # ambil langsung dari app.py
 
-bcrypt = Bcrypt()
+bcrypt = Bcrypt(app)
 
-if not User.query.filter_by(telepon='08123456789').first():
-    hashed_pw = bcrypt.generate_password_hash('admin123').decode('utf-8')
-    admin = User(
-        telepon='08123456789',
-        password=hashed_pw,
-        role='admin'
-    )
-    db.session.add(admin)
-    db.session.commit()
-    print("✅ Admin default berhasil ditambahkan.")
-else:
-    print("✅ Admin sudah ada.")
+default_telepon = '08123456789'
+default_password = 'admin123'
+default_role = 'admin'
+
+with app.app_context():
+    existing_admin = User.query.filter_by(telepon=default_telepon).first()
+
+    if not existing_admin:
+        hashed_password = bcrypt.generate_password_hash(default_password).decode('utf-8')
+        admin = User(
+            telepon=default_telepon,
+            password=hashed_password,
+            role=default_role,
+            username='admin'
+        )
+        db.session.add(admin)
+        db.session.commit()
+        print(f"✅ Admin default berhasil ditambahkan. Nomor: {default_telepon}")
+    else:
+        print("✅ Admin sudah ada.")

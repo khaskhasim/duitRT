@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Laporan Iuran Event per Warga{% endblock %}
+
+{% block content %}
+
+
+  <!-- Tabel Data -->
+  <div class="table-responsive">
+    <table class="table table-bordered table-striped table-hover align-middle">
+      <thead class="table-dark">
+        <tr class="text-center">
+          <th>Nama Warga</th>
+          <th>Nama Event</th>
+          <th>Tanggal</th>
+          <th>Jumlah</th>
+          <th>Petugas</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for i in iuran_event %}
+        <tr>
+          <td>{{ i.warga.nama }}</td>
+          <td>{{ i.nama_event }}</td>
+          <td>{{ i.tanggal.strftime('%d/%m/%Y') }}</td>
+          <td class="text-end">Rp {{ "{:,.0f}".format(i.jumlah) }}</td>
+          <td>{{ warga_dict[i.petugas]|default(i.petugas if i.petugas else '-') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
