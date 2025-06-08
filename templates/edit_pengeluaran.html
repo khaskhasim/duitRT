@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Edit Pengeluaran - duitRT{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <h2><i class="bi bi-pencil-square"></i> Edit Pengeluaran</h2>
+  <form method="POST" action="{{ url_for('edit_pengeluaran', id=pengeluaran.id) }}">
+    <div class="mb-3">
+      <label for="tanggal" class="form-label">Tanggal</label>
+      <input type="date" class="form-control" name="tanggal" value="{{ pengeluaran.tanggal.strftime('%Y-%m-%d') }}" required>
+    </div>
+    <div class="mb-3">
+      <label for="keterangan" class="form-label">Keterangan</label>
+      <input type="text" class="form-control" name="keterangan" value="{{ pengeluaran.keterangan }}" required>
+    </div>
+    <div class="mb-3">
+      <label for="penerima" class="form-label">Penerima</label>
+      <input type="text" class="form-control" name="penerima" value="{{ pengeluaran.penerima }}" required>
+    </div>
+    <div class="mb-3">
+      <label for="jumlah" class="form-label">Jumlah</label>
+      <input type="number" class="form-control" name="jumlah" value="{{ pengeluaran.jumlah }}" required>
+    </div>
+    <button type="submit" class="btn btn-primary">
+      <i class="bi bi-save"></i> Simpan Perubahan
+    </button>
+    <a href="{{ url_for('daftar_pengeluaran') }}" class="btn btn-secondary">Batal</a>
+  </form>
+</div>
+{% endblock %}

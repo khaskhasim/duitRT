@@ -3,66 +3,48 @@
 
 {% block content %}
 <div class="container mt-4">
-  <h2 class="mb-4"><i class="bi bi-pencil-square"></i> Edit Data Warga</h2>
-
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% for category, message in messages %}
-      <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
-        {{ message }}
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-      </div>
-    {% endfor %}
-  {% endwith %}
-
-  <form method="POST">
+  <h2><i class="bi bi-pencil-square"></i> Edit Data Warga</h2>
+  <form method="POST" action="{{ url_for('edit_warga', id=warga.id) }}">
     <div class="row g-3">
       <div class="col-md-6">
-        <label for="nama" class="form-label">Nama Lengkap</label>
-        <input type="text" class="form-control" id="nama" name="nama" value="{{ warga.nama }}" required>
+        <label for="nama" class="form-label">Nama</label>
+        <input type="text" class="form-control" name="nama" value="{{ warga.nama }}" required>
       </div>
-
       <div class="col-md-6">
         <label for="nik" class="form-label">NIK</label>
-        <input type="text" class="form-control" id="nik" name="nik" value="{{ warga.nik or '' }}">
+        <input type="text" class="form-control" name="nik" value="{{ warga.nik }}">
       </div>
-
       <div class="col-12">
         <label for="alamat" class="form-label">Alamat</label>
-        <textarea class="form-control" id="alamat" name="alamat" rows="3" required>{{ warga.alamat }}</textarea>
+        <textarea class="form-control" name="alamat" rows="2">{{ warga.alamat }}</textarea>
       </div>
-
       <div class="col-md-6">
-        <label for="telepon" class="form-label">Nomor Telepon (WA)</label>
-        <div class="input-group">
-          <span class="input-group-text">+62</span>
-          <input type="text" class="form-control" id="telepon" name="telepon" value="{{ warga.telepon or '' }}" placeholder="81234567890">
-        </div>
+        <label for="telepon" class="form-label">Nomor Telepon</label>
+        <input type="tel" class="form-control" name="telepon" value="{{ warga.telepon }}" required>
       </div>
-
-
-
-      <div class="col-md-6">
-        <label for="password" class="form-label">Password Baru (opsional)</label>
-        <input type="password" class="form-control" id="password" name="password" placeholder="Kosongkan jika tidak diganti">
-      </div>
-
       <div class="col-md-6">
         <label for="role" class="form-label">Peran</label>
-        <select class="form-select" id="role" name="role" required>
+        <select class="form-select" name="role">
           <option value="user" {% if warga.role == 'user' %}selected{% endif %}>Warga Biasa</option>
           <option value="petugas" {% if warga.role == 'petugas' %}selected{% endif %}>Petugas</option>
         </select>
       </div>
+      <div class="col-md-6">
+        <label for="status" class="form-label">Status</label>
+        <select class="form-select" name="status">
+          <option value="aktif" {% if warga.status == 'aktif' %}selected{% endif %}>Aktif</option>
+          <option value="nonaktif" {% if warga.status == 'nonaktif' %}selected{% endif %}>Nonaktif</option>
+        </select>
+      </div>
+      <div class="col-md-6">
+        <label for="password" class="form-label">Password (opsional)</label>
+        <input type="password" class="form-control" name="password" placeholder="Biarkan kosong jika tidak diubah">
+      </div>
     </div>
-
-    <div class="d-flex justify-content-between mt-4">
-      <a href="{{ url_for('data_warga') }}" class="btn btn-secondary">
-        <i class="bi bi-arrow-left"></i> Kembali
-      </a>
-      <button type="submit" class="btn btn-primary">
-        <i class="bi bi-save"></i> Simpan Perubahan
-      </button>
-    </div>
+    <button type="submit" class="btn btn-primary mt-3">
+      <i class="bi bi-save"></i> Simpan Perubahan
+    </button>
+    <a href="{{ url_for('data_warga') }}" class="btn btn-secondary mt-3 ms-2">Batal</a>
   </form>
 </div>
 {% endblock %}

@@ -21,6 +21,7 @@ from pytz import timezone
 import calendar
 from dotenv import load_dotenv
 import os
+##from models import Pengeluaran
 ##import requests
 
 from pytz import timezone
@@ -84,7 +85,7 @@ def get_filter_dates():
 class Warga(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     nama = db.Column(db.String(100), nullable=False)
-    nik = db.Column(db.String(30), unique=True)
+    nik = db.Column(db.String, unique=True, nullable=True)
     alamat = db.Column(db.String(255))
     telepon = db.Column(db.String(30), unique=True, nullable=False)  # login warga
     status = db.Column(db.String(20), default='aktif')
@@ -124,16 +125,11 @@ class EventNama(db.Model):
 # Model Pengeluaran
 class Pengeluaran(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    warga_id = db.Column(db.Integer, db.ForeignKey('warga.id'), nullable=True)
-    keterangan = db.Column(db.String(200), nullable=False)
-    penerima = db.Column(db.String(100), nullable=True)
-    tanggal = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    tanggal = db.Column(db.DateTime, nullable=False)
+    keterangan = db.Column(db.String(255), nullable=False)
+    penerima = db.Column(db.String(100), nullable=False)
     jumlah = db.Column(db.Integer, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    petugas = db.Column(db.String(50))  # tambahkan ini bila belum ada
-
-    warga = db.relationship('Warga', backref=db.backref('pengeluarans', lazy=True))
-
+    petugas = db.Column(db.String(20), nullable=True)  # disimpan nomor telepon
 
 
 
@@ -363,7 +359,7 @@ def dashboard():
         total_iuran = total_iuran_reguler + total_iuran_event
         total_pengeluaran = db.session.query(func.sum(Pengeluaran.jumlah)).scalar() or 0
         sisa_kas = total_iuran - total_pengeluaran
-
+        warga = Warga.query.filter_by(telepon=session['telepon']).first()
         aktivitas_terkini = get_aktivitas_terkini()
 
         from collections import defaultdict
@@ -393,6 +389,7 @@ def dashboard():
         data_pengeluaran = [mingguan_pengeluaran[i] for i in range(1, 6)]
 
         return render_template('dashboard_petugas.html',
+            nama=warga.nama,
             total_iuran=total_iuran,
             total_pengeluaran=total_pengeluaran,
             sisa_kas=sisa_kas,
@@ -603,55 +600,88 @@ def autocomplete_nama():
         nama_list = []
     return jsonify(nama_list)
 
+
 @app.route('/laporan')
 def laporan():
-    bulan = request.args.get('bulan', default=date.today().month, type=int)
-    tahun = request.args.get('tahun', default=date.today().year, type=int)
+    bulan = request.args.get('bulan', type=int, default=datetime.now().month)
+    tahun = request.args.get('tahun', type=int, default=datetime.now().year)
 
-    # Rentang tanggal berdasarkan bulan & tahun
-    start_date = date(tahun, bulan, 1)
-    end_date = date(tahun, bulan, calendar.monthrange(tahun, bulan)[1])
+    zona_wib = timezone('Asia/Jakarta')
 
-    # Ambil data Iuran bulanan & event
-    pemasukan_iuran = Iuran.query.filter(Iuran.tanggal.between(start_date, end_date)).all()
-    pemasukan_event = IuranEvent.query.filter(IuranEvent.tanggal.between(start_date, end_date)).all()
+    tgl_awal = datetime(tahun, bulan, 1, tzinfo=zona_wib)
+    if bulan == 12:
+        tgl_akhir = datetime(tahun + 1, 1, 1, tzinfo=zona_wib) - timedelta(seconds=1)
+    else:
+        tgl_akhir = datetime(tahun, bulan + 1, 1, tzinfo=zona_wib) - timedelta(seconds=1)
 
-    # Gabungkan pemasukan
+    # Ambil data pemasukan
+    pemasukan_iuran = (
+        db.session.query(Iuran)
+        .join(Warga)
+        .filter(Iuran.tanggal >= tgl_awal, Iuran.tanggal <= tgl_akhir)
+        .all()
+    )
+    pemasukan_event = (
+        db.session.query(IuranEvent)
+        .join(Warga)
+        .filter(IuranEvent.tanggal >= tgl_awal, IuranEvent.tanggal <= tgl_akhir)
+        .all()
+    )
     pemasukan = pemasukan_iuran + pemasukan_event
+    pemasukan.sort(key=lambda x: x.tanggal)
 
-    # Ambil pengeluaran
-    pengeluaran = Pengeluaran.query.filter(Pengeluaran.tanggal.between(start_date, end_date)).all()
+    # Tambahkan nama petugas (jika ada) sebagai properti dinamis
+    def get_nama_petugas(nomor_wa):
+        if not nomor_wa:
+            return '-'
+        petugas = Warga.query.filter_by(telepon=nomor_wa).first()
+        return petugas.nama if petugas else nomor_wa
 
-    # Hitung total
+    for item in pemasukan:
+        item.petugas_nama = get_nama_petugas(item.petugas)
+
+    # Ambil data pengeluaran
+    pengeluaran = (
+        db.session.query(Pengeluaran)
+        .filter(Pengeluaran.tanggal >= tgl_awal, Pengeluaran.tanggal <= tgl_akhir)
+        .all()
+    )
+
+    # Tambahkan field penerima
+    for item in pengeluaran:
+        item.penerima = get_nama_petugas(item.petugas)
+
+    # Total
     total_pemasukan = sum(i.jumlah for i in pemasukan)
     total_pengeluaran = sum(p.jumlah for p in pengeluaran)
     saldo_kas = total_pemasukan - total_pengeluaran
-    total_transaksi = len(pemasukan) + len(pengeluaran)
 
-    # Total iuran bulanan tahun ini
-    total_iuran_tahun_ini = db.session.query(func.sum(Iuran.jumlah))\
-        .filter(extract('year', Iuran.tanggal) == tahun)\
-        .scalar() or 0
-    # Total iuran event tahun ini
-    total_iuran_event_tahun_ini = db.session.query(func.sum(IuranEvent.jumlah))\
-        .filter(extract('year', IuranEvent.tanggal) == tahun)\
-        .scalar() or 0
-        # Gabungan total
-    total_iuran_tahun_ini += total_iuran_event_tahun_ini
-    # Grafik mingguan (gabungan iuran + event)
-    labels = [f"Minggu {i}" for i in range(1, 6)]
-    pemasukan_data = [0] * 5
-    pengeluaran_data = [0] * 5
+    # Total iuran tahun ini
+    awal_tahun = datetime(tahun, 1, 1, tzinfo=zona_wib)
+    akhir_tahun = datetime(tahun + 1, 1, 1, tzinfo=zona_wib) - timedelta(seconds=1)
+
+    total_iuran_tahun_ini = (
+        db.session.query(func.sum(Iuran.jumlah))
+        .filter(Iuran.tanggal >= awal_tahun, Iuran.tanggal <= akhir_tahun)
+        .scalar()
+    ) or 0
+
+    # Grafik data mingguan
+    from collections import defaultdict
+    pemasukan_data = defaultdict(int)
+    pengeluaran_data = defaultdict(int)
 
     for i in pemasukan:
-        week = ((i.tanggal.day - 1) // 7)
-        if 0 <= week < 5:
-            pemasukan_data[week] += i.jumlah
+        minggu = ((i.tanggal.day - 1) // 7) + 1
+        pemasukan_data[minggu] += i.jumlah
 
     for p in pengeluaran:
-        week = ((p.tanggal.day - 1) // 7)
-        if 0 <= week < 5:
-            pengeluaran_data[week] += p.jumlah
+        minggu = ((p.tanggal.day - 1) // 7) + 1
+        pengeluaran_data[minggu] += p.jumlah
+
+    labels = [f"Minggu {i}" for i in range(1, 6)]
+    data_pemasukan = [pemasukan_data[i] for i in range(1, 6)]
+    data_pengeluaran = [pengeluaran_data[i] for i in range(1, 6)]
 
     return render_template('laporan.html',
         pemasukan=pemasukan,
@@ -659,16 +689,14 @@ def laporan():
         total_pemasukan=total_pemasukan,
         total_pengeluaran=total_pengeluaran,
         saldo_kas=saldo_kas,
-        total_transaksi=total_transaksi,
-        labels=labels,
-        pemasukan_data=pemasukan_data,
-        pengeluaran_data=pengeluaran_data,
+        total_iuran_tahun_ini=total_iuran_tahun_ini,
         bulan=bulan,
         tahun=tahun,
-        total_iuran_tahun_ini=total_iuran_tahun_ini,
-        date=date,
-        datetime=datetime
+        labels=labels,
+        pemasukan_data=data_pemasukan,
+        pengeluaran_data=data_pengeluaran
     )
+
 
 
 
@@ -740,57 +768,6 @@ def laporan_input_petugas():
 
 
 
-@app.route('/admin')
-def dashboard_admin():
-    if 'username' not in session or session.get('role') != 'admin':
-        flash("Akses ditolak", "danger")
-        return redirect(url_for('login'))
-
-    total_warga = Warga.query.count()
-    total_iuran = db.session.query(func.sum(Iuran.jumlah)).scalar() or 0
-    total_pengeluaran = db.session.query(func.sum(Pengeluaran.jumlah)).scalar() or 0
-    sisa_kas = total_iuran - total_pengeluaran
-
-    # Perhitungan statistik mingguan (bulan ini)
-    from collections import defaultdict
-    bulan_ini = datetime.now().month
-    tahun_ini = datetime.now().year
-
-    iurans = Iuran.query.filter(
-        extract('month', Iuran.tanggal) == bulan_ini,
-        extract('year', Iuran.tanggal) == tahun_ini
-    ).all()
-
-    pengeluarans = Pengeluaran.query.filter(
-        extract('month', Pengeluaran.tanggal) == bulan_ini,
-        extract('year', Pengeluaran.tanggal) == tahun_ini
-    ).all()
-
-    mingguan_iuran = defaultdict(int)
-    mingguan_pengeluaran = defaultdict(int)
-
-    for i in iurans:
-        minggu = ((i.tanggal.day - 1) // 7) + 1
-        mingguan_iuran[minggu] += i.jumlah
-
-    for p in pengeluarans:
-        minggu = ((p.tanggal.day - 1) // 7) + 1
-        mingguan_pengeluaran[minggu] += p.jumlah
-
-    labels = [f"Minggu {i}" for i in range(1, 6)]
-    data_iuran = [mingguan_iuran[i] for i in range(1, 6)]
-    data_pengeluaran = [mingguan_pengeluaran[i] for i in range(1, 6)]
-
-    return render_template("dashboard_admin.html",
-        username=session['username'],
-        total_warga=total_warga,
-        total_iuran=total_iuran,
-        total_pengeluaran=total_pengeluaran,
-        sisa_kas=sisa_kas,
-        labels=labels,
-        data_iuran=data_iuran,
-        data_pengeluaran=data_pengeluaran
-    )
 
 
 
@@ -807,12 +784,12 @@ def data_warga():
         telepon = request.form['telepon'].strip()
         password = request.form['password']
         role = request.form['role']
+        status = request.form.get('status', 'aktif')
 
         if not nama or not telepon or not password:
             flash("Nama, Telepon, dan Password wajib diisi", "danger")
             return redirect(url_for('data_warga'))
 
-        # Cek duplikasi nomor telepon
         if Warga.query.filter_by(telepon=telepon).first():
             flash("Nomor telepon sudah digunakan", "danger")
             return redirect(url_for('data_warga'))
@@ -821,11 +798,12 @@ def data_warga():
 
         warga_baru = Warga(
             nama=nama,
-            nik=nik,
+            nik=nik if nik else None,
             alamat=alamat,
             telepon=telepon,
             password=hashed_pw,
-            role=role
+            role=role,
+            status=status
         )
         db.session.add(warga_baru)
         db.session.commit()
@@ -833,8 +811,20 @@ def data_warga():
         flash("✅ Warga berhasil ditambahkan", "success")
         return redirect(url_for('data_warga'))
 
-    wargas = Warga.query.order_by(Warga.nama).all()
-    return render_template("warga.html", wargas=wargas)
+    # === Bagian GET: tampilkan warga dengan pagination dan search ===
+    page = request.args.get('page', 1, type=int)
+    search = request.args.get('search', '', type=str)
+
+    query = Warga.query
+    if search:
+        query = query.filter(
+            Warga.nama.ilike(f'%{search}%') |
+            Warga.telepon.ilike(f'%{search}%')
+        )
+
+    wargas = query.order_by(Warga.nama.asc()).paginate(page=page, per_page=10)
+
+    return render_template("warga.html", wargas=wargas, search=search)
 
 
 
@@ -891,7 +881,7 @@ def edit_warga(id):
         warga.nik = nik
         warga.alamat = request.form['alamat']
         warga.telepon = request.form.get('telepon', '').strip()
-        warga.username = request.form['username']
+       ## warga.username = request.form['username']
         warga.role = request.form['role']  # hanya role, status dihapus
 
         if request.form['password']:
@@ -907,125 +897,248 @@ def edit_warga(id):
 @app.route('/warga/hapus/<int:id>', methods=['POST'])
 def hapus_warga(id):
     warga = Warga.query.get_or_404(id)
+
+    # Hapus semua iuran yang terkait terlebih dahulu
+    Iuran.query.filter_by(warga_id=warga.id).delete()
+    IuranEvent.query.filter_by(warga_id=warga.id).delete()  # jika kamu juga pakai IuranEvent
+
     db.session.delete(warga)
     db.session.commit()
-    flash('Data warga berhasil dihapus', 'success')
+
+    flash('Data warga berhasil dihapus.', 'success')
     return redirect(url_for('data_warga'))
 
+@app.route('/search_warga')
+def search_warga():
+    q = request.args.get('q', '').strip().lower()
+    results = []
 
-# Route Pengeluaran
+    if q:
+        wargas = Warga.query.filter(Warga.nama.ilike(f'%{q}%')).limit(10).all()
+        results = [{'id': w.id, 'nama': w.nama, 'telepon': w.telepon} for w in wargas]
+
+    return jsonify(results)
+
+
+
+@app.route('/export_warga')
+def export_warga():
+    if 'username' not in session or session.get('role') != 'admin':
+        flash("Akses ditolak", "danger")
+        return redirect(url_for('login'))
+
+    warga_data = Warga.query.order_by(Warga.nama).all()
+
+    data = [{
+        'Nama': w.nama,
+        'NIK': w.nik or '',
+        'Alamat': w.alamat or '',
+        'Telepon': w.telepon or '',
+        'Status': w.status or '',
+        'Peran': w.role or ''
+    } for w in warga_data]
+
+    df = pd.DataFrame(data)
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Warga')
+
+    output.seek(0)
+    return send_file(
+        output,
+        download_name="data_warga.xlsx",
+        as_attachment=True,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+
+
+
+
+# TAMBAH PENGELUARAN
 @app.route('/pengeluaran/tambah', methods=['GET', 'POST'])
 def tambah_pengeluaran():
+    if 'telepon' not in session:
+        flash("Akses ditolak", "danger")
+        return redirect(url_for('login'))
+
     if request.method == 'POST':
         try:
             zona_wib = timezone('Asia/Jakarta')
-            keterangan = request.form['keterangan'].strip()
-            penerima = request.form['penerima'].strip()
-            tanggal_str = request.form['tanggal']  # dari input HTML (format: YYYY-MM-DD)
-
-            # Gabungkan tanggal dengan waktu saat ini
-            tanggal_tanpa_jam = datetime.strptime(tanggal_str, '%Y-%m-%d')
+            tanggal_str = request.form['tanggal']
             jam_sekarang = datetime.now(zona_wib).time()
-            tanggal_full = datetime.combine(tanggal_tanpa_jam, jam_sekarang)
+            tanggal_obj = datetime.strptime(tanggal_str, '%Y-%m-%d')
+            tanggal_full = datetime.combine(tanggal_obj, jam_sekarang)
             tanggal_full = zona_wib.localize(tanggal_full)
 
+            keterangan = request.form['keterangan'].strip()
+            penerima = request.form['penerima'].strip()
             jumlah = int(request.form['jumlah'])
+            petugas = session.get('telepon')  # no telepon
 
             if not keterangan or not penerima:
-                flash('Keterangan dan Penerima tidak boleh kosong', 'danger')
+                flash('Semua field wajib diisi.', 'danger')
                 return redirect(url_for('tambah_pengeluaran'))
 
             if jumlah < 1000:
-                flash('Jumlah pengeluaran minimal Rp 1.000', 'danger')
+                flash('Jumlah minimal Rp 1.000', 'danger')
                 return redirect(url_for('tambah_pengeluaran'))
 
-            # Ambil petugas dari session
-            petugas = session.get('username') if session.get('role') in ['admin', 'petugas'] else None
-
-            pengeluaran_baru = Pengeluaran(
+            baru = Pengeluaran(
+                tanggal=tanggal_full,
                 keterangan=keterangan,
                 penerima=penerima,
-                tanggal=tanggal_full,
                 jumlah=jumlah,
                 petugas=petugas
             )
-
-            db.session.add(pengeluaran_baru)
+            db.session.add(baru)
             db.session.commit()
 
-            flash('Pengeluaran berhasil dicatat!', 'success')
+            flash('✅ Pengeluaran berhasil dicatat', 'success')
             return redirect(url_for('daftar_pengeluaran'))
 
-        except ValueError:
-            flash('Format input tidak valid', 'danger')
         except Exception as e:
             db.session.rollback()
-            flash(f'Terjadi kesalahan: {str(e)}', 'danger')
+            flash(f'Error: {str(e)}', 'danger')
 
     return render_template('tambah_pengeluaran.html', date=datetime.now(timezone('Asia/Jakarta')))
 
 
 @app.route('/pengeluaran')
 def daftar_pengeluaran():
-    # Dapatkan parameter filter
     bulan = request.args.get('bulan', type=int)
     tahun = request.args.get('tahun', type=int)
-    
-    # Query dengan filter
+
     query = Pengeluaran.query
-    
+
     if bulan:
         query = query.filter(db.extract('month', Pengeluaran.tanggal) == bulan)
     if tahun:
         query = query.filter(db.extract('year', Pengeluaran.tanggal) == tahun)
-    
-    pengeluaran = query.order_by(Pengeluaran.tanggal.desc()).all()
-    
-    # Hitung total
-    total = sum(p.jumlah for p in pengeluaran) if pengeluaran else 0
-    
-    return render_template('daftar_pengeluaran.html', 
-                         pengeluaran=pengeluaran,
-                         total=total,
-                         bulan=bulan,
-                         tahun=tahun)
 
-@app.route('/pengeluaran/hapus/<int:id>', methods=['POST'])
-def hapus_pengeluaran(id):
-    pengeluaran = Pengeluaran.query.get_or_404(id)
-    
-    try:
-        db.session.delete(pengeluaran)
-        db.session.commit()
-        flash('Data pengeluaran berhasil dihapus', 'success')
-    except Exception as e:
-        db.session.rollback()
-        flash(f'Gagal menghapus: {str(e)}', 'danger')
-    
-    return redirect(url_for('daftar_pengeluaran'))
+    pengeluaran_list = query.order_by(Pengeluaran.tanggal.desc()).all()
+
+    # Buat mapping nomor telepon ke nama petugas dari tabel Warga
+    petugas_dict = {w.telepon: w.nama for w in Warga.query.all()}
+
+    # Sisipkan nama petugas ke setiap item pengeluaran
+    for p in pengeluaran_list:
+        p.nama_petugas = petugas_dict.get(p.petugas, "-")
+
+    total = sum(p.jumlah for p in pengeluaran_list)
+
+    return render_template(
+        'daftar_pengeluaran.html',
+        pengeluaran=pengeluaran_list,
+        total=total,
+        bulan=bulan,
+        tahun=tahun
+    )
+
+
 
 @app.route('/pengeluaran/edit/<int:id>', methods=['GET', 'POST'])
 def edit_pengeluaran(id):
     pengeluaran = Pengeluaran.query.get_or_404(id)
-    
+
     if request.method == 'POST':
-        pengeluaran.penerima = request.form['penerima'].strip()
-        pengeluaran.keterangan = request.form['keterangan'].strip()
-        pengeluaran.tanggal = datetime.strptime(request.form['tanggal'], '%Y-%m-%d').date()
-        pengeluaran.jumlah = int(request.form['jumlah'])
-        
         try:
+            zona_wib = timezone('Asia/Jakarta')
+            tanggal_str = request.form['tanggal']
+            tanggal_obj = datetime.strptime(tanggal_str, '%Y-%m-%d')
+            jam_sekarang = datetime.now(zona_wib).time()
+            tanggal_full = zona_wib.localize(datetime.combine(tanggal_obj, jam_sekarang))
+
+            keterangan = request.form['keterangan'].strip()
+            penerima = request.form['penerima'].strip()
+            jumlah = int(request.form['jumlah'])
+
+            if not keterangan or not penerima:
+                flash('Keterangan dan Penerima tidak boleh kosong', 'danger')
+                return redirect(url_for('edit_pengeluaran', id=id))
+
+            if jumlah < 1000:
+                flash('Jumlah pengeluaran minimal Rp 1.000', 'danger')
+                return redirect(url_for('edit_pengeluaran', id=id))
+
+            pengeluaran.tanggal = tanggal_full
+            pengeluaran.keterangan = keterangan
+            pengeluaran.penerima = penerima
+            pengeluaran.jumlah = jumlah
+
             db.session.commit()
-            flash('Data pengeluaran berhasil diperbarui', 'success')
-            return redirect(url_for('daftar_pengeluaran'))  # Biasanya redirect ke daftar, bukan tambah
+            flash('✅ Data pengeluaran berhasil diperbarui.', 'success')
+            return redirect(url_for('daftar_pengeluaran'))
+
         except Exception as e:
             db.session.rollback()
-            flash(f'Terjadi error: {str(e)}', 'danger')
-    
-    return render_template('form_pengeluaran.html', pengeluaran=pengeluaran)
+            flash(f'❌ Terjadi kesalahan: {str(e)}', 'danger')
+
+    return render_template('edit_pengeluaran.html', pengeluaran=pengeluaran)
 
 
 
+@app.route('/pengeluaran/hapus/<int:id>', methods=['POST'])
+def hapus_pengeluaran(id):
+    try:
+        pengeluaran = Pengeluaran.query.get_or_404(id)
+        db.session.delete(pengeluaran)
+        db.session.commit()
+        flash('Data pengeluaran berhasil dihapus.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Gagal menghapus pengeluaran: {str(e)}', 'danger')
+    return redirect(url_for('daftar_pengeluaran'))
+
+
+
+@app.route('/pengeluaran/export')
+def export_pengeluaran():
+    bulan = request.args.get('bulan', type=int)
+    tahun = request.args.get('tahun', type=int)
+
+    query = Pengeluaran.query
+
+    if bulan:
+        query = query.filter(db.extract('month', Pengeluaran.tanggal) == bulan)
+    if tahun:
+        query = query.filter(db.extract('year', Pengeluaran.tanggal) == tahun)
+
+    pengeluaran = query.order_by(Pengeluaran.tanggal).all()
+
+    # Ambil semua telepon petugas yang muncul
+    nomor_petugas = [p.petugas for p in pengeluaran if p.petugas]
+    petugas_dict = {w.telepon: w.nama for w in Warga.query.filter(Warga.telepon.in_(nomor_petugas)).all()}
+
+    data = [{
+        'Tanggal': p.tanggal.strftime('%d/%m/%Y'),
+        'Keterangan': p.keterangan,
+        'Penerima': p.penerima,
+        'Petugas': petugas_dict.get(p.petugas, '') if p.petugas else '',
+        'Jumlah': p.jumlah
+    } for p in pengeluaran]
+
+    df = pd.DataFrame(data)
+    total_pengeluaran = sum(p.jumlah for p in pengeluaran)
+
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Pengeluaran', startrow=0)
+
+        # Tambahkan total
+        workbook = writer.book
+        worksheet = writer.sheets['Pengeluaran']
+        row_count = len(df) + 2
+        worksheet.write(row_count, 3, 'Total', workbook.add_format({'bold': True}))
+        worksheet.write(row_count, 4, total_pengeluaran, workbook.add_format({'bold': True, 'num_format': '#,##0'}))
+
+    output.seek(0)
+    return send_file(
+        output,
+        download_name='pengeluaran.xlsx',
+        as_attachment=True,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
 
 
 
@@ -1049,22 +1162,24 @@ def import_warga():
     baris_skip = 0
 
     for idx, row in enumerate(csv_reader):
+        if idx == 0:
+            continue  # Lewati header
+
         if len(row) != 7:
             baris_skip += 1
             continue
 
-        nama, nik, alamat, telepon, status, username, plain_pw = [x.strip() for x in row]
+        nama, nik, alamat, telepon, status, role, plain_pw = [x.strip() for x in row]
 
-        if not nama or not username or not plain_pw:
+        if not nama or not telepon or not plain_pw:
             baris_skip += 1
             continue
 
-        # Cek duplikat username
-        if Warga.query.filter_by(username=username).first():
+        # Cek duplikat nomor telepon
+        if Warga.query.filter_by(telepon=telepon).first():
             baris_duplikat += 1
             continue
 
-        # Hash password
         hashed_pw = bcrypt.generate_password_hash(plain_pw).decode('utf-8')
 
         warga_baru = Warga(
@@ -1072,23 +1187,18 @@ def import_warga():
             nik=nik or None,
             alamat=alamat,
             telepon=telepon,
-            status=status.lower(),
-            username=username,
+            status=status.lower() if status.lower() in ['aktif', 'nonaktif'] else 'aktif',
+            username=telepon,
             password=hashed_pw,
-            role='user'
+            role=role.lower() if role.lower() in ['user', 'petugas'] else 'user'
         )
         db.session.add(warga_baru)
         baris_sukses += 1
 
     db.session.commit()
-    flash(f'{baris_sukses} warga berhasil diimpor. {baris_duplikat} username sudah digunakan. {baris_skip} baris dilewati.', 'success')
+    flash(f'{baris_sukses} warga berhasil diimpor. {baris_duplikat} nomor telepon sudah digunakan. {baris_skip} baris dilewati.', 'success')
     return redirect(url_for('data_warga'))
 
-
-
-    db.session.commit()
-    flash('Data warga berhasil diimpor.', 'success')
-    return redirect(url_for('data_warga'))
 
 
 class PDF(FPDF):
@@ -1116,11 +1226,23 @@ class PDF(FPDF):
             self.ln()
         self.ln(5)
 
+def get_filter_dates():
+    # Ganti dengan cara ambil tgl_awal dan tgl_akhir dari parameter / session sesuai kebutuhan
+    today = datetime.now(timezone('Asia/Jakarta'))
+    tgl_awal = today.replace(day=1)
+    tgl_akhir = today.replace(day=calendar.monthrange(today.year, today.month)[1])
+    return tgl_awal, tgl_akhir
+
 @app.route('/export_laporan/<format>')
 def export_laporan(format):
-
     tgl_awal, tgl_akhir = get_filter_dates()
     zona_wib = timezone('Asia/Jakarta')
+
+    # Ambil mapping nomor telepon ke nama petugas
+    warga_map = {
+        w.telepon: w.nama
+        for w in Warga.query.with_entities(Warga.telepon, Warga.nama).all()
+    }
 
     pemasukan_iuran = (
         db.session.query(Iuran)
@@ -1136,12 +1258,8 @@ def export_laporan(format):
         .all()
     )
 
-    # Gabungkan jadi satu list
     pemasukan = pemasukan_iuran + pemasukan_event
-
-    # Urutkan berdasarkan tanggal
     pemasukan.sort(key=lambda x: x.tanggal)
-
 
     pengeluaran = (
         db.session.query(Pengeluaran)
@@ -1150,43 +1268,42 @@ def export_laporan(format):
         .all()
     )
 
-    headers1 = ['No', 'Tanggal', 'Nama Warga', 'Jumlah', 'Keterangan']
+    headers1 = ['No', 'Tanggal', 'Nama Warga', 'Jumlah', 'Keterangan', 'Petugas']
     headers2 = ['No', 'Tanggal', 'Keterangan', 'Jumlah', 'Petugas']
 
     if format == 'excel':
         output = BytesIO()
         workbook = xlsxwriter.Workbook(output, {'in_memory': True})
 
-        # Sheet Pemasukan
         ws1 = workbook.add_worksheet('Pemasukan')
         for col, h in enumerate(headers1):
             ws1.write(0, col, h)
 
         for idx, item in enumerate(pemasukan, 1):
             tanggal = item.tanggal.astimezone(zona_wib).strftime('%d/%m/%Y %H:%M')
-            nama = item.warga.nama
-            jumlah = item.jumlah
+            nama_petugas = warga_map.get(item.petugas, item.petugas or "-")
             sumber = f"Event: {item.nama_event}" if item.__class__.__name__ == "IuranEvent" else "Iuran Bulanan"
 
             ws1.write(idx, 0, idx)
             ws1.write(idx, 1, tanggal)
-            ws1.write(idx, 2, nama)
-            ws1.write(idx, 3, jumlah)
+            ws1.write(idx, 2, item.warga.nama)
+            ws1.write(idx, 3, item.jumlah)
             ws1.write(idx, 4, sumber)
+            ws1.write(idx, 5, nama_petugas)
 
-
-        # Sheet Pengeluaran
         ws2 = workbook.add_worksheet('Pengeluaran')
         for col, h in enumerate(headers2):
             ws2.write(0, col, h)
 
         for idx, item in enumerate(pengeluaran, 1):
             tanggal = item.tanggal.astimezone(zona_wib).strftime('%d/%m/%Y %H:%M')
+            nama_petugas = warga_map.get(item.petugas, item.petugas or "-")
+
             ws2.write(idx, 0, idx)
             ws2.write(idx, 1, tanggal)
             ws2.write(idx, 2, item.keterangan)
             ws2.write(idx, 3, item.jumlah)
-            ws2.write(idx, 4, item.petugas or '-')
+            ws2.write(idx, 4, nama_petugas)
 
         workbook.close()
         output.seek(0)
@@ -1197,27 +1314,36 @@ def export_laporan(format):
         pdf = PDF()
         pdf.add_page()
 
-        pemasukan_rows = [[
-            idx,
-            i.tanggal.astimezone(zona_wib).strftime('%d/%m/%Y %H:%M'),
-            i.warga.nama,
-            f"Rp {i.jumlah:,}",
-            f"Event: {i.nama_event}" if i.__class__.__name__ == "IuranEvent" else "Iuran Bulanan"
-        ] for idx, i in enumerate(pemasukan, 1)]
+        pemasukan_rows = []
+        for idx, i in enumerate(pemasukan, 1):
+            tanggal = i.tanggal.astimezone(zona_wib).strftime('%d/%m/%Y %H:%M')
+            nama_petugas = warga_map.get(i.petugas, i.petugas or "-")
+            pemasukan_rows.append([
+                idx,
+                tanggal,
+                i.warga.nama,
+                f"Rp {i.jumlah:,}",
+                f"Event: {i.nama_event}" if i.__class__.__name__ == "IuranEvent" else "Iuran Bulanan",
+                nama_petugas
+            ])
 
-        pengeluaran_rows = [[
-            idx,
-            p.tanggal.astimezone(zona_wib).strftime('%d/%m/%Y %H:%M'),
-            p.keterangan,
-            f"Rp {p.jumlah:,}",
-            p.petugas or "-"
-        ] for idx, p in enumerate(pengeluaran, 1)]
+        pengeluaran_rows = []
+        for idx, p in enumerate(pengeluaran, 1):
+            tanggal = p.tanggal.astimezone(zona_wib).strftime('%d/%m/%Y %H:%M')
+            nama_petugas = warga_map.get(p.petugas, p.petugas or "-")
+            pengeluaran_rows.append([
+                idx,
+                tanggal,
+                p.keterangan,
+                f"Rp {p.jumlah:,}",
+                nama_petugas
+            ])
 
         pdf.table_section("Pemasukan", headers1, pemasukan_rows)
         pdf.table_section("Pengeluaran", headers2, pengeluaran_rows)
 
         pdf_bytes = BytesIO()
-        pdf_output = pdf.output(dest='S').encode('latin1')  # ✅ Fix here
+        pdf_output = pdf.output(dest='S').encode('latin1')
         pdf_bytes.write(pdf_output)
         pdf_bytes.seek(0)
 
@@ -1232,8 +1358,8 @@ def export_laporan(format):
 def download_template():
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['nama', 'nik', 'alamat', 'telepon', 'status', 'username', 'password'])
-    writer.writerow(['Contoh Nama', '1234567890123456', 'Jl. Contoh Alamat', '08123456789', 'aktif', 'contohuser', '123456'])
+    writer.writerow(['nama', 'nik', 'alamat', 'telepon', 'status', 'role', 'password'])
+    writer.writerow(['Contoh Nama', '1234567890123456', 'Jl. Contoh Alamat', '08123456789', 'aktif', 'user', '123456'])
 
     output.seek(0)
     return send_file(
@@ -1242,6 +1368,7 @@ def download_template():
         as_attachment=True,
         download_name='template_warga.csv'
     )
+
 
 @app.route('/manajemen_user')
 def manajemen_user():
@@ -1515,7 +1642,37 @@ def laporan_iuran_event_per_warga():
     )
 
 
+@app.route('/ubah_password_petugas', methods=['GET', 'POST'])
+def ubah_password_petugas():
+    if 'telepon' not in session or session.get('role') != 'petugas':
+        flash('Akses ditolak.', 'danger')
+        return redirect(url_for('login'))
 
+    petugas = Warga.query.filter_by(telepon=session['telepon'], role='petugas').first()
+    if not petugas:
+        flash('Petugas tidak ditemukan.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    if request.method == 'POST':
+        password_lama = request.form.get('password_lama')
+        password_baru = request.form.get('password_baru')
+        konfirmasi = request.form.get('konfirmasi')
+
+        if not bcrypt.check_password_hash(petugas.password, password_lama):
+            flash('Password lama salah.', 'danger')
+        elif password_baru != konfirmasi:
+            flash('Konfirmasi password tidak cocok.', 'danger')
+        else:
+            petugas.password = bcrypt.generate_password_hash(password_baru).decode('utf-8')
+            db.session.commit()
+            flash('Password berhasil diubah.', 'success')
+            return redirect(url_for('dashboard'))
+
+    return render_template('ubah_password_petugas.html', nama=petugas.nama)
+
+
+
+########################   API    ============
 
 @app.route('/api/iuran', methods=['POST'])
 def api_iuran():
